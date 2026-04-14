@@ -1,0 +1,15 @@
+# 医学CT到VoxDet数据管道依赖
+
+# 核心依赖
+numpy>=1.21.0
+nibabel>=3.2.0           # NIfTI文件处理
+scikit-image>=0.19.0     # marching cubes算法
+trimesh>=3.10.0          # mesh处理
+pyrender>=0.1.45         # 深度渲染
+PyOpenGL>=3.1.0          # pyrender依赖
+
+# 进度条和日志
+tqdm>=4.62.0
+
+# 可选：GPU加速（如需要）
+# cupy-cuda11x>=11.0.0
