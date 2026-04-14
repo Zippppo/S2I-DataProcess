@@ -1,14 +1,13 @@
-# 医学CT到VoxDet数据转换管道
+# Medical CT to VoxDet Data Pipeline
 
-将医学CT数据（CT扫描 + 器官分割）转换为VoxDet兼容的训练数据格式。
+将医学CT数据（CT扫描 + 器官分割）转换为VoxDet兼容的3D体素训练数据。
 
-## 关键设计决策
+## 核心设计
 
-根据 `ANALYSIS_REUSE.md` 的分析：
-
-1. **不需要归一化** - 直接使用世界坐标（毫米）
-2. **皮肤和器官数据天然对齐** - 都使用相同的 `ct_affine` 矩阵
-3. **体素网格范围基于皮肤点云边界确定** - 保证覆盖一致
+- **世界坐标系（毫米）** — 不做归一化，直接使用CT affine矩阵提供的物理坐标
+- **固定体素尺寸，动态网格大小** — 指定物理体素大小（默认4×4×4mm），网格维度由点云边界自动计算
+- **123类器官标签** — 覆盖TotalSegmentator v2全集，通过优先级列表解决重叠冲突
+- **自动裁剪** — 基于HU阈值检测人体区域，裁剪多余空间
 
 ## 快速开始
 
@@ -23,7 +22,7 @@ pip install -r requirements.txt
 ```bash
 python generate_voxdet_data.py \
     --input_dir /path/to/ct_data \
-    --output_dir ./output/voxdet_medical \
+    --output_dir ./output \
     --single_case BDMAP_00000001
 ```
 
@@ -32,7 +31,7 @@ python generate_voxdet_data.py \
 ```bash
 python generate_voxdet_data.py \
     --input_dir /path/to/ct_data \
-    --output_dir ./output/voxdet_medical \
+    --output_dir ./output \
     --train_ratio 0.7 \
     --val_ratio 0.15
 ```
@@ -41,131 +40,107 @@ python generate_voxdet_data.py \
 
 ```bash
 python generate_voxdet_data.py \
-    --output_dir ./output/voxdet_medical \
+    --output_dir ./output \
     --verify
 ```
 
-## 输入数据结构
+### 3D可视化
+
+```bash
+python scripts/visualize_voxel_3d.py --input path/to/case.npz
+```
+
+支持交互式Plotly渲染，包含预设视图（全器官、骨骼、胸腔、血管等）和透明度控制。
+
+## CLI参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--input_dir` | — | 输入数据目录 |
+| `--output_dir` | — | 输出目录（必填） |
+| `--single_case` | — | 仅处理指定案例 |
+| `--train_ratio` | 0.7 | 训练集比例 |
+| `--val_ratio` | 0.15 | 验证集比例 |
+| `--voxel_size` | 4 4 4 | 体素物理尺寸（mm） |
+| `--max_occ_size` | 256 | 网格上限 |
+| `--min_occ_size` | 64 | 网格下限 |
+| `--skip_existing` | false | 跳过已处理案例 |
+| `--verify` | false | 仅验证模式 |
+| `--seed` | 42 | 随机种子 |
+
+## 数据格式
+
+### 输入
 
 ```
 input_dir/
 ├── BDMAP_00000001/
-│   ├── ct.nii.gz                    # CT扫描
+│   ├── ct.nii.gz
 │   └── segmentations/
-│       ├── liver.nii.gz             # 器官分割
-│       ├── spleen.nii.gz
+│       ├── liver.nii.gz
+│       ├── kidney_left.nii.gz
 │       └── ...
-├── BDMAP_00000002/
-│   └── ...
 └── ...
 ```
 
-## 输出数据结构
+### 输出
+
+每个案例输出为单个压缩 `.npz` 文件：
 
 ```
-output/voxdet_medical/
-├── sequences/
-│   ├── train/velodyne/
-│   │   ├── BDMAP_00000001.bin       # 点云 [N, 4] float32
-│   │   └── ...
-│   ├── val/velodyne/
-│   └── test/velodyne/
-├── labels/
-│   ├── train/
-│   │   ├── BDMAP_00000001_1_1.npy   # 体素标签 [128,128,128] uint8
-│   │   ├── BDMAP_00000001_1_2.npy   # 下采样 [64,64,64] uint8
-│   │   └── ...
-│   ├── val/
-│   └── test/
-└── metadata/
-    ├── class_names.json
-    ├── train_split.txt
-    ├── val_split.txt
-    └── test_split.txt
+output_dir/
+├── train/
+│   └── BDMAP_00000001.npz
+├── val/
+├── test/
+└── dataset_info.json
 ```
+
+`.npz` 内容：
+
+| Key | 类型 | 说明 |
+|-----|------|------|
+| `sensor_pc` | float32, (N, 3) | 皮肤表面点云（世界坐标） |
+| `voxel_labels` | uint8, (X, Y, Z) | 器官体素标签 |
+| `grid_world_min` | float32, (3,) | 网格起始坐标 |
+| `grid_world_max` | float32, (3,) | 网格终止坐标 |
+| `grid_voxel_size` | float32, (3,) | 体素物理尺寸 |
+| `grid_occ_size` | int, (3,) | 网格维度 |
 
 ## 项目结构
 
 ```
 medical_voxdet_data_pipeline/
 ├── config/
-│   ├── data_config.py               # 数据配置
-│   ├── organ_mapping.py             # 器官标签映射
-│   └── voxdet_config_template.py    # VoxDet配置模板
-├── utils/
-│   ├── mesh_generation.py           # Mesh生成（复用自CT2PointCloud）
-│   ├── camera_system.py             # 相机系统（复用）
-│   ├── voxelization.py              # 体素化
-│   └── format_converter.py          # 格式转换
+│   ├── data_config.py            # DataConfig / CameraConfig / VoxelConfig
+│   └── organ_mapping.py          # 123类器官映射与优先级
 ├── pipeline/
-│   └── ct_to_voxdet.py              # 主转换管道
+│   └── ct_to_voxdet.py           # CTToVoxDetConverter 主转换流程
+├── utils/
+│   ├── mesh_generation.py        # CT加载、皮肤mesh生成（marching cubes）
+│   ├── camera_system.py          # 虚拟相机 + 深度渲染 → 点云
+│   ├── voxelization.py           # 体素网格创建、器官标签、裁剪
+│   └── format_converter.py       # NPZ保存与验证
 ├── scripts/
-│   ├── verify_output.py             # 验证输出
-│   └── visualize_sample.py          # 可视化样本
-├── tests/
-│   └── test_all_modules.py          # 全面测试
-├── generate_voxdet_data.py          # 主入口
-└── requirements.txt
+│   └── visualize_voxel_3d.py     # 交互式3D可视化（Plotly）
+├── generate_voxdet_data.py       # 主入口
+├── requirements.txt
+└── README.md
 ```
 
-## 器官类别
+## 处理流程
 
-| ID | 器官 | ID | 器官 |
-|----|------|----|----|
-| 0 | background | 10 | colon |
-| 1 | liver | 11 | lung_left |
-| 2 | spleen | 12 | lung_right |
-| 3 | kidney_left | 13 | aorta |
-| 4 | kidney_right | 14 | inferior_vena_cava |
-| 5 | stomach | 15 | adrenal_gland_left |
-| 6 | pancreas | 16 | adrenal_gland_right |
-| 7 | gallbladder | 17 | esophagus |
-| 8 | urinary_bladder | 18 | small_bowel |
-| 9 | heart | 19 | duodenum |
-
-## VoxDet配置
-
-生成数据后，需要计算 `point_cloud_range`：
-
-```python
-from config.voxdet_config_template import compute_dataset_range
-
-# 计算点云范围
-range = compute_dataset_range('output/voxdet_medical/sequences/train/velodyne')
-# 输出: [-500.0, -500.0, -200.0, 100.0, 100.0, 400.0]
-
-# 在VoxDet配置中使用
-point_cloud_range = range
-occ_size = [128, 128, 128]
+```
+CT + Segmentations
+    │
+    ├─ 1. 加载CT → 提取affine矩阵
+    ├─ 2. HU阈值 → 皮肤mesh → 深度渲染 → 传感器点云
+    ├─ 3. 点云边界 → 创建体素网格（固定体素尺寸）
+    ├─ 4. 逐器官查询分割掩码 → 按优先级合并标签
+    ├─ 5. HU阈值检测人体区域 → 裁剪至人体边界
+    └─ 6. 保存为 .npz
 ```
 
-## 运行测试
+## 依赖
 
-```bash
-cd medical_voxdet_data_pipeline
-python tests/test_all_modules.py
-```
-
-## 技术细节
-
-### 坐标系统
-
-- 使用世界坐标（毫米），不需要归一化
-- 皮肤点云和体素标签在同一坐标系中对齐
-- VoxDet模型通过 `point_cloud_range` 配置处理坐标映射
-
-### 体素化流程
-
-1. 加载CT数据和affine矩阵
-2. 生成皮肤mesh → 深度渲染 → 皮肤点云
-3. 根据皮肤点云边界创建体素网格
-4. 对每个器官分割：查询体素标签
-5. 按优先级合并多器官标签
-6. 保存为VoxDet格式
-
-### 复用代码
-
-- `mesh_generation.py`: 100%复用自CT2PointCloud
-- `camera_system.py`: 大部分复用（去除归一化）
-- `voxelization.py`: 新实现
-- `format_converter.py`: 新实现
+- numpy, nibabel, scikit-image, trimesh, pyrender, PyOpenGL, tqdm
