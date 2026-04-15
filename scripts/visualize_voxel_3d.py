@@ -8,6 +8,8 @@
 
 Usage:
     python visualize_voxel_3d.py [--file PATH] [--downsample N]
+    python scripts/visualize_voxel_3d.py --file test-output\train\BDMAP_00000001.npz 
+    
 
 Author: auto-generated
 Date: 2026-04-14
@@ -24,7 +26,7 @@ from skimage.measure import marching_cubes
 # ---------------------------------------------------------------------------
 # 项目内器官映射
 # ---------------------------------------------------------------------------
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config.organ_mapping import LABEL_TO_ORGAN
 
 # ---------------------------------------------------------------------------

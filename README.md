@@ -1,6 +1,6 @@
-# Medical CT to VoxDet Data Pipeline
+# Medical CT to S2I Data Pipeline
 
-将医学CT数据（CT扫描 + 器官分割）转换为VoxDet兼容的3D体素训练数据。
+将医学CT数据（CT扫描 + 器官分割）转换为S2I兼容的3D体素训练数据。
 
 ## 核心设计
 
@@ -20,7 +20,7 @@ pip install -r requirements.txt
 ### 处理单个案例
 
 ```bash
-python generate_voxdet_data.py \
+python generate_s2i.py \
     --input_dir /path/to/ct_data \
     --output_dir ./output \
     --single_case BDMAP_00000001
@@ -29,7 +29,7 @@ python generate_voxdet_data.py \
 ### 批量处理
 
 ```bash
-python generate_voxdet_data.py \
+python generate_s2i.py \
     --input_dir /path/to/ct_data \
     --output_dir ./output \
     --train_ratio 0.7 \
@@ -39,7 +39,7 @@ python generate_voxdet_data.py \
 ### 验证输出
 
 ```bash
-python generate_voxdet_data.py \
+python generate_s2i.py \
     --output_dir ./output \
     --verify
 ```
@@ -110,12 +110,12 @@ output_dir/
 ## 项目结构
 
 ```
-medical_voxdet_data_pipeline/
+medical_s2i_data_pipeline/
 ├── config/
 │   ├── data_config.py            # DataConfig / CameraConfig / VoxelConfig
 │   └── organ_mapping.py          # 123类器官映射与优先级
 ├── pipeline/
-│   └── ct_to_voxdet.py           # CTToVoxDetConverter 主转换流程
+│   └── ct_to_s2i.py              # CTToS2IConverter 主转换流程
 ├── utils/
 │   ├── mesh_generation.py        # CT加载、皮肤mesh生成（marching cubes）
 │   ├── camera_system.py          # 虚拟相机 + 深度渲染 → 点云
@@ -123,7 +123,7 @@ medical_voxdet_data_pipeline/
 │   └── format_converter.py       # NPZ保存与验证
 ├── scripts/
 │   └── visualize_voxel_3d.py     # 交互式3D可视化（Plotly）
-├── generate_voxdet_data.py       # 主入口
+├── generate_s2i.py       # 主入口
 ├── requirements.txt
 └── README.md
 ```

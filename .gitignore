@@ -12,3 +12,4 @@ build/
 # Environment
 .env
 *.log
+test-output/

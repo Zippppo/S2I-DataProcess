@@ -1,35 +1,35 @@
 r"""
-VoxDet医学数据生成主入口
+S2I医学数据生成主入口
 
 用法:
     # 处理所有数据（默认4mm体素）
-    python generate_voxdet_data.py \
+    python generate_s2i.py \
         --input_dir /path/to/ct_data \
-        --output_dir ./output/voxdet_medical \
+        --output_dir ./output/s2i_medical \
         --train_ratio 0.7 \
         --val_ratio 0.15
 
     # 自定义体素大小（如3mm，更精细）
-    python generate_voxdet_data.py \
+    python generate_s2i.py \
         --input_dir /path/to/ct_data \
-        --output_dir ./output/voxdet_medical \
+        --output_dir ./output/s2i_medical \
         --voxel_size 3 3 3
 
     # 处理单个案例（调试用）
-    python generate_voxdet_data.py \
+    python generate_s2i.py \
         --input_dir /path/to/ct_data \
         --output_dir ./output/test \
         --single_case BDMAP_00000001
 
     # 验证输出
-    python generate_voxdet_data.py \
-        --output_dir ./output/voxdet_medical \
+    python generate_s2i.py \
+        --output_dir ./output/s2i_medical \
         --verify
 
     # 增量处理（跳过已存在的案例）
-    python generate_voxdet_data.py \
+    python generate_s2i.py \
         --input_dir /path/to/ct_data \
-        --output_dir ./output/voxdet_medical \
+        --output_dir ./output/s2i_medical \
         --skip_existing
 """
 
@@ -41,7 +41,7 @@ from tqdm import tqdm
 
 from config.data_config import DataConfig
 from config.organ_mapping import get_class_names, NUM_CLASSES
-from pipeline.ct_to_voxdet import CTToVoxDetConverter
+from pipeline.ct_to_s2i import CTToS2IConverter
 from utils.format_converter import save_dataset_info
 
 
@@ -113,7 +113,7 @@ def split_dataset(
 
 
 def process_cases(
-    converter: CTToVoxDetConverter,
+    converter: CTToS2IConverter,
     cases: List[Dict],
     output_dir: Path,
     split: str,
@@ -163,7 +163,7 @@ def process_cases(
 
 def verify_outputs(output_dir: Path, config: DataConfig) -> Dict:
     """验证所有输出"""
-    converter = CTToVoxDetConverter(config=config)
+    converter = CTToS2IConverter(config=config)
     results = {'valid': 0, 'invalid': 0, 'errors': []}
 
     for split in ['train', 'val', 'test']:
@@ -188,7 +188,7 @@ def verify_outputs(output_dir: Path, config: DataConfig) -> Dict:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='生成VoxDet医学训练数据')
+    parser = argparse.ArgumentParser(description='生成S2I医学训练数据')
 
     parser.add_argument('--input_dir', type=str, help='输入数据目录')
     parser.add_argument('--output_dir', type=str, required=True, help='输出目录')
@@ -241,7 +241,7 @@ def main():
         print(f"错误: 输入目录不存在: {input_dir}")
         return
 
-    converter = CTToVoxDetConverter(config=config)
+    converter = CTToS2IConverter(config=config)
 
     if args.single_case:
         # 处理单个案例

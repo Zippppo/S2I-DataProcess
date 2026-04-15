@@ -1,5 +1,5 @@
 """
-CT到VoxDet数据转换管道
+CT到S2I数据转换管道
 
 流程:
 1. 加载CT数据和affine矩阵
@@ -49,8 +49,8 @@ class ConversionResult:
     error: Optional[str] = None
 
 
-class CTToVoxDetConverter:
-    """CT到VoxDet数据转换器"""
+class CTToS2IConverter:
+    """CT到S2I数据转换器"""
 
     def __init__(self, config: DataConfig = None):
         self.config = config or DataConfig()
