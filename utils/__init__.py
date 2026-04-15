@@ -16,6 +16,7 @@ from .camera_system import (
 
 from .voxelization import (
     create_voxel_grid_world_coords,
+    precompute_voxel_indices,
     label_voxels_from_segmentation,
     combine_organ_labels,
     create_body_mask_from_ct,

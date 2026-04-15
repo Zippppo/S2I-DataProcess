@@ -105,11 +105,41 @@ def create_voxel_grid_world_coords(
     return voxel_world_coords, grid_info
 
 
+def precompute_voxel_indices(
+    voxel_world_coords: np.ndarray,
+    ct_affine: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, tuple]:
+    """
+    一次性计算 world -> CT voxel 的整数索引，供多次器官查询复用
+
+    参数:
+        voxel_world_coords: (X, Y, Z, 3) 体素中心世界坐标
+        ct_affine: CT的仿射矩阵 (4x4)
+
+    返回:
+        indices: (N, 3) int 数组，N = X*Y*Z
+        lower_valid: (N,) bool 数组，indices >= 0 的下界检查
+        grid_shape: (X, Y, Z) 元组，用于将扁平结果重塑为3D
+    """
+    grid_shape = voxel_world_coords.shape[:3]
+    flat_coords = voxel_world_coords.reshape(-1, 3)
+
+    affine_inv = np.linalg.inv(ct_affine)
+    coords_homo = np.hstack([flat_coords, np.ones((len(flat_coords), 1))])
+    ct_coords = (affine_inv @ coords_homo.T).T[:, :3]
+    indices = np.round(ct_coords).astype(int)
+
+    lower_valid = (indices >= 0).all(axis=1)
+
+    return indices, lower_valid, grid_shape
+
+
 def label_voxels_from_segmentation(
     voxel_world_coords: np.ndarray,
     seg_data: np.ndarray,
     ct_affine: np.ndarray,
-    organ_label: int
+    organ_label: int,
+    precomputed: Tuple[np.ndarray, np.ndarray, tuple] = None,
 ) -> np.ndarray:
     """
     查询每个体素在器官分割中的标签
@@ -119,26 +149,21 @@ def label_voxels_from_segmentation(
         seg_data: 器官分割数据（3D数组）
         ct_affine: CT的仿射矩阵
         organ_label: 该器官的标签ID
+        precomputed: precompute_voxel_indices 的返回值（可选，用于避免重复计算）
 
     返回:
         labels: (X, Y, Z) 体素标签
     """
-    shape = voxel_world_coords.shape[:3]
-    flat_coords = voxel_world_coords.reshape(-1, 3)
+    if precomputed is None:
+        precomputed = precompute_voxel_indices(voxel_world_coords, ct_affine)
+    indices, lower_valid, grid_shape = precomputed
 
-    # 世界坐标 -> CT体素坐标
-    affine_inv = np.linalg.inv(ct_affine)
-    coords_homo = np.hstack([flat_coords, np.ones((len(flat_coords), 1))])
-    ct_coords = (affine_inv @ coords_homo.T).T[:, :3]
-
-    # 四舍五入到最近的体素
-    indices = np.round(ct_coords).astype(int)
-
-    # 边界检查
-    valid = ((indices >= 0) & (indices < np.array(seg_data.shape))).all(axis=1)
+    # 上界检查（每个 volume 形状可能不同）
+    upper_valid = (indices < np.array(seg_data.shape)).all(axis=1)
+    valid = lower_valid & upper_valid
 
     # 查询标签
-    labels = np.zeros(len(flat_coords), dtype=np.uint8)
+    labels = np.zeros(len(indices), dtype=np.uint8)
     valid_indices = indices[valid]
 
     is_inside = seg_data[valid_indices[:, 0],
@@ -146,7 +171,7 @@ def label_voxels_from_segmentation(
                          valid_indices[:, 2]] > 0
     labels[valid] = np.where(is_inside, organ_label, 0)
 
-    return labels.reshape(shape)
+    return labels.reshape(grid_shape)
 
 
 def combine_organ_labels(
@@ -180,7 +205,8 @@ def create_body_mask_from_ct(
     voxel_world_coords: np.ndarray,
     ct_data: np.ndarray,
     ct_affine: np.ndarray,
-    hu_threshold: float = -500.0
+    hu_threshold: float = -500.0,
+    precomputed: Tuple[np.ndarray, np.ndarray, tuple] = None,
 ) -> np.ndarray:
     """
     根据CT数据的HU值创建体内掩码
@@ -190,22 +216,19 @@ def create_body_mask_from_ct(
         ct_data: CT数据（3D数组，HU值）
         ct_affine: CT的仿射矩阵
         hu_threshold: HU阈值
+        precomputed: precompute_voxel_indices 的返回值（可选，用于避免重复计算）
 
     返回:
         body_mask: (X, Y, Z) 布尔数组，True表示体内
     """
-    shape = voxel_world_coords.shape[:3]
-    flat_coords = voxel_world_coords.reshape(-1, 3)
+    if precomputed is None:
+        precomputed = precompute_voxel_indices(voxel_world_coords, ct_affine)
+    indices, lower_valid, grid_shape = precomputed
 
-    # 世界坐标 -> CT体素坐标
-    affine_inv = np.linalg.inv(ct_affine)
-    coords_homo = np.hstack([flat_coords, np.ones((len(flat_coords), 1))])
-    ct_coords = (affine_inv @ coords_homo.T).T[:, :3]
+    upper_valid = (indices < np.array(ct_data.shape)).all(axis=1)
+    valid = lower_valid & upper_valid
 
-    indices = np.round(ct_coords).astype(int)
-    valid = ((indices >= 0) & (indices < np.array(ct_data.shape))).all(axis=1)
-
-    body_mask = np.zeros(len(flat_coords), dtype=bool)
+    body_mask = np.zeros(len(indices), dtype=bool)
     valid_indices = indices[valid]
 
     hu_values = ct_data[valid_indices[:, 0],
@@ -213,7 +236,7 @@ def create_body_mask_from_ct(
                         valid_indices[:, 2]]
     body_mask[valid] = hu_values > hu_threshold
 
-    return body_mask.reshape(shape)
+    return body_mask.reshape(grid_shape)
 
 
 def crop_to_body_bbox(

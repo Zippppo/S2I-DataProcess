@@ -169,7 +169,9 @@ def extract_organ_mesh(voxel_labels: np.ndarray, label_id: int,
 # ---------------------------------------------------------------------------
 def build_figure(npz_path: str, downsample: int = 1,
                  show_groups: list | None = None,
-                 opacity: float = 1.0) -> go.Figure:
+                 opacity: float = 1.0,
+                 show_skin: bool = True,
+                 pc_downsample: int = 1) -> go.Figure:
     """
     Build an interactive 3D Plotly figure.
 
@@ -179,11 +181,14 @@ def build_figure(npz_path: str, downsample: int = 1,
     downsample : spatial downsample factor (1 = full res, 2 = half, …)
     show_groups : list of group names to show initially (None = all)
     opacity : mesh opacity (1.0 = fully opaque)
+    show_skin : whether to display the sensor_pc skin point cloud
+    pc_downsample : point cloud downsample factor (1 = all points)
     """
     data = np.load(npz_path)
     voxel_labels = data["voxel_labels"]
     world_min = data["grid_world_min"]
     voxel_size = data["grid_voxel_size"]
+    sensor_pc = data["sensor_pc"]
 
     # Validate labels (0=inside empty, 255=outside bg, 1-122=organs)
     report = validate_labels(voxel_labels)
@@ -250,6 +255,28 @@ def build_figure(npz_path: str, downsample: int = 1,
                      args=[{"visible": True}, group_trace_indices]),
             )
 
+    # --- Skin (sensor_pc) point cloud trace ---
+    skin_trace_idx = None
+    if sensor_pc is not None and len(sensor_pc) > 0:
+        pc = sensor_pc[::pc_downsample]
+        skin_trace = go.Scatter3d(
+            x=pc[:, 0], y=pc[:, 1], z=pc[:, 2],
+            mode='markers',
+            marker=dict(size=1, color='rgba(180,180,180,0.3)'),
+            name=f'Skin (Input, {len(pc):,} pts)',
+            legendgroup='Skin (Input)',
+            legendgrouptitle_text='Skin (Input)',
+            hovertemplate=(
+                "<b>Skin point</b><br>"
+                "x: %{x:.1f} mm<br>y: %{y:.1f} mm<br>z: %{z:.1f} mm"
+                "<extra></extra>"
+            ),
+            visible=True if show_skin else "legendonly",
+        )
+        skin_trace_idx = len(traces)
+        traces.append(skin_trace)
+        trace_groups.append('Skin (Input)')
+
     if not traces:
         raise RuntimeError("No organ meshes could be extracted — data may be empty.")
 
@@ -262,16 +289,21 @@ def build_figure(npz_path: str, downsample: int = 1,
         return [True if g in groups_on else "legendonly" for g in trace_groups]
 
     preset_buttons = [
-        dict(label="All Organs",
+        dict(label="All + Skin",
              method="restyle",
              args=[{"visible": [True] * n}]),
+        dict(label="All Organs",
+             method="restyle",
+             args=[{"visible": _visibility_for(
+                 set(ORGAN_GROUPS.keys()))}]),
         dict(label="Solid Organs Only",
              method="restyle",
              args=[{"visible": _visibility_for({"Solid Organs"})}]),
-        dict(label="Skeleton",
+        dict(label="Skeleton + Skin",
              method="restyle",
              args=[{"visible": _visibility_for(
-                 {"Vertebrae", "Left Ribs", "Right Ribs", "Other Bones"})}]),
+                 {"Vertebrae", "Left Ribs", "Right Ribs", "Other Bones",
+                  "Skin (Input)"})}]),
         dict(label="Thorax (Lungs + Heart + Ribs)",
              method="restyle",
              args=[{"visible": _visibility_for(
@@ -281,16 +313,9 @@ def build_figure(npz_path: str, downsample: int = 1,
              method="restyle",
              args=[{"visible": _visibility_for(
                  {"Arteries", "Veins & Cardiac"})}]),
-        dict(label="Muscles + Bones",
+        dict(label="Skin Only",
              method="restyle",
-             args=[{"visible": _visibility_for(
-                 {"Muscles", "Vertebrae", "Left Ribs", "Right Ribs",
-                  "Other Bones"})}]),
-        dict(label="Soft Tissue Only",
-             method="restyle",
-             args=[{"visible": _visibility_for(
-                 {"Solid Organs", "Lung Lobes", "Digestive Tract",
-                  "Muscles"})}]),
+             args=[{"visible": _visibility_for({"Skin (Input)"})}]),
         dict(label="Hide All",
              method="restyle",
              args=[{"visible": ["legendonly"] * n}]),
@@ -314,6 +339,7 @@ def build_figure(npz_path: str, downsample: int = 1,
                   f"{voxel_size[0]:.1f} mm | "
                   f"Grid: {voxel_labels.shape} | "
                   f"Organs: {len(present_labels)} | "
+                  f"Skin pts: {len(sensor_pc):,} | "
                   f"Inside empty: {report['n_inside_empty']/report['total']*100:.1f}% | "
                   f"Outside bg: {report['n_outside_bg']/report['total']*100:.1f}%</sup>"),
             x=0.5,
@@ -409,6 +435,12 @@ def main():
         "--no-body-comp", action="store_true",
         help="Hide body composition (fat/muscle) on startup for cleaner view")
     parser.add_argument(
+        "--no-skin", action="store_true",
+        help="Hide skin point cloud on startup")
+    parser.add_argument(
+        "--pc-downsample", type=int, default=1,
+        help="Point cloud downsample factor (1=all points, 4=every 4th point)")
+    parser.add_argument(
         "--save-html", type=str, default=None,
         help="Save as standalone HTML file instead of opening browser")
     args = parser.parse_args()
@@ -423,6 +455,8 @@ def main():
         downsample=args.downsample,
         show_groups=show_groups,
         opacity=args.opacity,
+        show_skin=not args.no_skin,
+        pc_downsample=args.pc_downsample,
     )
 
     if args.save_html:

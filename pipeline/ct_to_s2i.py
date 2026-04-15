@@ -21,6 +21,7 @@ from utils.mesh_generation import load_ct_for_meshing, generate_skin_mesh, load_
 from utils.camera_system import generate_sensor_pointcloud
 from utils.voxelization import (
     create_voxel_grid_world_coords,
+    precompute_voxel_indices,
     label_voxels_from_segmentation,
     combine_organ_labels,
     create_body_mask_from_ct,
@@ -195,6 +196,9 @@ class CTToS2IConverter:
         返回:
             final_labels, body_mask, num_organs
         """
+        # 预计算体素索引（一次性，所有器官和body mask共享）
+        precomputed = precompute_voxel_indices(voxel_coords, ct_affine)
+
         label_arrays = []
         organ_names = []
         processed_files = set()
@@ -212,7 +216,8 @@ class CTToS2IConverter:
             try:
                 seg_data, _ = load_segmentation(seg_path)
                 labels = label_voxels_from_segmentation(
-                    voxel_coords, seg_data, ct_affine, organ_label
+                    voxel_coords, seg_data, ct_affine, organ_label,
+                    precomputed=precomputed,
                 )
                 label_arrays.append(labels)
                 organ_names.append(organ_name)
@@ -239,7 +244,8 @@ class CTToS2IConverter:
             try:
                 seg_data, _ = load_segmentation(seg_file)
                 labels = label_voxels_from_segmentation(
-                    voxel_coords, seg_data, ct_affine, organ_label
+                    voxel_coords, seg_data, ct_affine, organ_label,
+                    precomputed=precomputed,
                 )
                 label_arrays.append(labels)
                 organ_names.append(organ_name)
@@ -256,7 +262,8 @@ class CTToS2IConverter:
         # 创建体内掩码并应用区域标签
         body_mask = create_body_mask_from_ct(
             voxel_coords, ct_data, ct_affine,
-            hu_threshold=self.config.SKIN_HU_THRESHOLD
+            hu_threshold=self.config.SKIN_HU_THRESHOLD,
+            precomputed=precomputed,
         )
         final_labels = apply_body_region_labels(
             combined, body_mask,
