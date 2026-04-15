@@ -27,7 +27,12 @@ from skimage.measure import marching_cubes
 # 项目内器官映射
 # ---------------------------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from config.organ_mapping import LABEL_TO_ORGAN
+from config.organ_mapping import (
+    INSIDE_BODY_EMPTY_LABEL,
+    LABEL_TO_ORGAN,
+    NUM_CLASSES,
+    OUTSIDE_BODY_BACKGROUND_LABEL,
+)
 
 # ---------------------------------------------------------------------------
 # 解剖分组 & 科研配色
@@ -47,33 +52,82 @@ ORGAN_GROUPS = {
     "Body Composition": [119, 120, 121, 122],
 }
 
-# 每个分组一个主色调，组内器官通过明度/饱和度微调区分
-# 科研级调色板 — 参考 Nature Methods / Lancet 配色
-GROUP_PALETTES = {
-    "Solid Organs":     {"h": 10,  "s": [0.65, 0.85], "l": [0.45, 0.65]},  # warm red-brown
-    "Lung Lobes":       {"h": 200, "s": [0.50, 0.70], "l": [0.55, 0.72]},  # sky blue
-    "Digestive Tract":  {"h": 35,  "s": [0.60, 0.80], "l": [0.48, 0.62]},  # amber
-    "Adrenal Glands":   {"h": 55,  "s": [0.55, 0.70], "l": [0.50, 0.60]},  # olive
-    "Vertebrae":        {"h": 45,  "s": [0.20, 0.40], "l": [0.60, 0.78]},  # bone ivory
-    "Left Ribs":        {"h": 40,  "s": [0.18, 0.35], "l": [0.62, 0.80]},  # light bone
-    "Right Ribs":       {"h": 50,  "s": [0.18, 0.35], "l": [0.62, 0.80]},  # light bone
-    "Other Bones":      {"h": 42,  "s": [0.25, 0.45], "l": [0.55, 0.72]},  # tan
-    "Muscles":          {"h": 0,   "s": [0.55, 0.75], "l": [0.40, 0.55]},  # deep red
-    "Arteries":         {"h": 355, "s": [0.75, 0.90], "l": [0.42, 0.55]},  # bright red
-    "Veins & Cardiac":  {"h": 240, "s": [0.50, 0.70], "l": [0.40, 0.58]},  # blue-violet
-    "Body Composition": {"h": 90,  "s": [0.15, 0.30], "l": [0.65, 0.80]},  # muted green-gray
-}
+# ---------------------------------------------------------------------------
+# 配色：黄金角度色相分散，保证每个 label 颜色差异最大化
+# ---------------------------------------------------------------------------
+_GOLDEN_ANGLE = 137.508
 
 
-def _color_for_organ(group_name: str, idx_in_group: int, group_size: int) -> str:
-    """Generate an HSL color for an organ within its anatomical group."""
-    pal = GROUP_PALETTES.get(group_name)
-    if pal is None:
-        return "hsl(0, 50%, 50%)"
-    t = idx_in_group / max(group_size - 1, 1)
-    s = pal["s"][0] + t * (pal["s"][1] - pal["s"][0])
-    l = pal["l"][0] + t * (pal["l"][1] - pal["l"][0])
-    return f"hsl({pal['h']}, {s*100:.0f}%, {l*100:.0f}%)"
+def _color_for_label(label_id: int) -> str:
+    """Assign a visually distinct color per label using golden-angle hue spacing."""
+    hue = (label_id * _GOLDEN_ANGLE) % 360
+    return f"hsl({hue:.0f}, 78%, 55%)"
+
+
+def validate_labels(voxel_labels: np.ndarray) -> dict:
+    """
+    Validate voxel label array and print diagnostics.
+
+    Checks:
+    - Label 0 (inside_body_empty) and 255 (outside_body_background) exist
+    - All labels are within expected range (0-122 or 255)
+    - Reports any unexpected labels
+
+    Returns summary dict with label statistics.
+    """
+    unique, counts = np.unique(voxel_labels, return_counts=True)
+    total = voxel_labels.size
+    label_counts = dict(zip(unique.tolist(), counts.tolist()))
+
+    n_inside_empty = label_counts.get(INSIDE_BODY_EMPTY_LABEL, 0)
+    n_outside_bg = label_counts.get(OUTSIDE_BODY_BACKGROUND_LABEL, 0)
+    organ_labels = {l for l in unique if l != INSIDE_BODY_EMPTY_LABEL
+                    and l != OUTSIDE_BODY_BACKGROUND_LABEL}
+    valid_organ_range = set(range(1, NUM_CLASSES))  # 1-122
+    unexpected = organ_labels - valid_organ_range
+
+    n_organ = sum(label_counts[l] for l in organ_labels)
+
+    print("=" * 60)
+    print("  Label Validation Report")
+    print("=" * 60)
+    print(f"  Grid shape     : {voxel_labels.shape}")
+    print(f"  Total voxels   : {total:,}")
+    print(f"  Unique labels  : {len(unique)}")
+    print("-" * 60)
+    print(f"  [Label   0] inside_body_empty   : {n_inside_empty:>10,}  "
+          f"({n_inside_empty/total*100:5.1f}%)")
+    print(f"  [Label 255] outside_body_bg      : {n_outside_bg:>10,}  "
+          f"({n_outside_bg/total*100:5.1f}%)")
+    print(f"  [Label 1-122] organ voxels       : {n_organ:>10,}  "
+          f"({n_organ/total*100:5.1f}%)")
+    print(f"  Organ types present              : {len(organ_labels)}")
+    print("-" * 60)
+
+    ok = True
+    if n_inside_empty == 0:
+        print("  [WARN] Label 0 (inside_body_empty) not found!")
+        ok = False
+    if n_outside_bg == 0:
+        print("  [WARN] Label 255 (outside_body_background) not found!")
+        ok = False
+    if unexpected:
+        print(f"  [ERROR] Unexpected labels outside [0-122, 255]: {sorted(unexpected)}")
+        ok = False
+
+    if ok:
+        print("  [OK] All labels valid.")
+    print("=" * 60)
+
+    return {
+        "total": total,
+        "n_inside_empty": n_inside_empty,
+        "n_outside_bg": n_outside_bg,
+        "n_organ": n_organ,
+        "organ_labels": sorted(organ_labels),
+        "unexpected": sorted(unexpected),
+        "label_counts": label_counts,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -131,9 +185,15 @@ def build_figure(npz_path: str, downsample: int = 1,
     world_min = data["grid_world_min"]
     voxel_size = data["grid_voxel_size"]
 
-    present_labels = set(np.unique(voxel_labels)) - {0}
+    # Validate labels (0=inside empty, 255=outside bg, 1-122=organs)
+    report = validate_labels(voxel_labels)
+    if report["unexpected"]:
+        print(f"[WARN] Proceeding with {len(report['unexpected'])} unexpected labels")
+
+    present_labels = set(report["organ_labels"])
 
     traces = []
+    trace_groups = []  # group name per trace, for visibility presets
     buttons_group = []  # group-level toggle buttons
 
     for group_name, label_ids in ORGAN_GROUPS.items():
@@ -152,7 +212,7 @@ def build_figure(npz_path: str, downsample: int = 1,
 
             verts, faces = result
             organ_name = LABEL_TO_ORGAN.get(lid, f"label_{lid}")
-            color = _color_for_organ(group_name, i, len(group_ids_present))
+            color = _color_for_label(lid)
 
             trace = go.Mesh3d(
                 x=verts[:, 0], y=verts[:, 1], z=verts[:, 2],
@@ -181,13 +241,13 @@ def build_figure(npz_path: str, downsample: int = 1,
             )
             group_trace_indices.append(len(traces))
             traces.append(trace)
+            trace_groups.append(group_name)
 
         # group toggle button
         if group_trace_indices:
             buttons_group.append(
                 dict(label=group_name, method="restyle",
                      args=[{"visible": True}, group_trace_indices]),
-                # We'll build proper toggle buttons below
             )
 
     if not traces:
@@ -199,19 +259,7 @@ def build_figure(npz_path: str, downsample: int = 1,
     n = len(traces)
 
     def _visibility_for(groups_on):
-        vis = []
-        idx = 0
-        for gname, lids in ORGAN_GROUPS.items():
-            present = [lid for lid in lids if lid in present_labels]
-            for lid in present:
-                # check if mesh was actually generated
-                if idx < n:
-                    vis.append(True if gname in groups_on else "legendonly")
-                    idx += 1
-        # pad remaining (shouldn't happen)
-        while len(vis) < n:
-            vis.append("legendonly")
-        return vis
+        return [True if g in groups_on else "legendonly" for g in trace_groups]
 
     preset_buttons = [
         dict(label="All Organs",
@@ -265,7 +313,9 @@ def build_figure(npz_path: str, downsample: int = 1,
                   f"<sup style='color:#666'>Voxel size: "
                   f"{voxel_size[0]:.1f} mm | "
                   f"Grid: {voxel_labels.shape} | "
-                  f"Organs: {len(present_labels)}</sup>"),
+                  f"Organs: {len(present_labels)} | "
+                  f"Inside empty: {report['n_inside_empty']/report['total']*100:.1f}% | "
+                  f"Outside bg: {report['n_outside_bg']/report['total']*100:.1f}%</sup>"),
             x=0.5,
             font=dict(size=18, family="Arial, Helvetica, sans-serif"),
         ),

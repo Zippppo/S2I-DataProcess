@@ -13,6 +13,11 @@ from pathlib import Path
 from typing import Union, Dict, Any
 import json
 
+from config.organ_mapping import (
+    INSIDE_BODY_EMPTY_LABEL,
+    OUTSIDE_BODY_BACKGROUND_LABEL,
+)
+
 
 def save_case_npz(
     sensor_pc: np.ndarray,
@@ -73,14 +78,18 @@ def save_dataset_info(
     info = {
         'num_classes': num_classes,
         'class_names': class_names,
+        'special_labels': {
+            'inside_body_empty': INSIDE_BODY_EMPTY_LABEL,
+            'outside_body_background': OUTSIDE_BODY_BACKGROUND_LABEL,
+        },
         'voxel_size_mm': voxel_size or [4.0, 4.0, 4.0],
         'max_occ_size': max_occ_size,
         'min_occ_size': min_occ_size,
         'coordinate_system': 'world_mm',
         'label_dtype': 'uint8',
         'pointcloud_dtype': 'float32',
-        'format_version': '3.0',
-        'note': '网格大小根据数据动态计算，体素大小固定'
+        'format_version': '3.1',
+        'note': '标签语义: 0=inside_body_empty, 1-122=organs, 255=outside_body_background'
     }
 
     info_path = output_dir / 'dataset_info.json'
@@ -125,6 +134,10 @@ def verify_npz_format(file_path: Union[str, Path]) -> Dict[str, Any]:
             },
             'unique_labels': np.unique(voxel_labels).tolist(),
             'non_zero_voxels': int((voxel_labels > 0).sum()),
+            'organ_voxels': int(((voxel_labels > 0) &
+                                 (voxel_labels != OUTSIDE_BODY_BACKGROUND_LABEL)).sum()),
+            'inside_body_empty_voxels': int((voxel_labels == INSIDE_BODY_EMPTY_LABEL).sum()),
+            'outside_body_background_voxels': int((voxel_labels == OUTSIDE_BODY_BACKGROUND_LABEL).sum()),
             'grid_info': {
                 'world_min': data['grid_world_min'].tolist(),
                 'world_max': data['grid_world_max'].tolist(),

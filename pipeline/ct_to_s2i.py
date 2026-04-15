@@ -30,9 +30,9 @@ from utils.voxelization import (
 from utils.format_converter import save_case_npz, verify_npz_format
 from config.data_config import DataConfig
 from config.organ_mapping import (
-    ORGAN_MAPPING,
-    ORGAN_PRIORITY,
     INSIDE_BODY_EMPTY_LABEL,
+    ORGAN_PRIORITY,
+    OUTSIDE_BODY_BACKGROUND_LABEL,
     get_organ_label,
 )
 
@@ -82,16 +82,16 @@ class CTToS2IConverter:
 
         try:
             # Step 1: 加载CT数据
-            print(f"  [1/6] 加载CT数据...")
+            print("  [1/6] Loading CT data...")
             ct_data, ct_affine = load_ct_for_meshing(ct_path)
 
             # Step 2: 生成皮肤点云
-            print(f"  [2/6] 生成皮肤点云...")
+            print("  [2/6] Generating skin point cloud...")
             sensor_pc = self._generate_sensor_pointcloud(ct_data, ct_affine)
-            print(f"        点云大小: {len(sensor_pc)} 点")
+            print(f"        Point cloud size: {len(sensor_pc)} points")
 
             # Step 3: 创建体素网格
-            print(f"  [3/6] 创建体素网格...")
+            print("  [3/6] Creating voxel grid...")
             voxel_coords, grid_info = create_voxel_grid_world_coords(
                 sensor_pc,
                 padding=self.config.voxel.PADDING,
@@ -99,33 +99,36 @@ class CTToS2IConverter:
                 max_occ_size=self.config.voxel.MAX_OCC_SIZE,
                 min_occ_size=self.config.voxel.MIN_OCC_SIZE
             )
-            print(f"        网格大小: {grid_info['occ_size']}")
-            print(f"        体素大小: {grid_info['voxel_size']} mm")
-            print(f"        模式: {grid_info['mode']}")
+            print(f"        Grid size: {grid_info['occ_size']}")
+            print(f"        Voxel size: {grid_info['voxel_size']} mm")
+            print(f"        Mode: {grid_info['mode']}")
 
             # Step 4: 生成体素标签
-            print(f"  [4/6] 生成体素标签...")
+            print("  [4/6] Generating voxel labels...")
             voxel_labels, body_mask, num_organs = self._generate_voxel_labels(
                 voxel_coords, seg_dir, ct_data, ct_affine
             )
-            print(f"        处理器官数: {num_organs}")
-            print(f"        有器官体素: {(voxel_labels >= 1).sum()}")
-            print(f"        体内空白: {(voxel_labels == INSIDE_BODY_EMPTY_LABEL).sum()}")
+            print(f"        Processed organs: {num_organs}")
+            organ_mask = ((voxel_labels > 0) &
+                          (voxel_labels != OUTSIDE_BODY_BACKGROUND_LABEL))
+            print(f"        Organ voxels: {organ_mask.sum()}")
+            print(f"        Inside-body empty voxels: {(voxel_labels == INSIDE_BODY_EMPTY_LABEL).sum()}")
+            print(f"        Outside-body background voxels: {(voxel_labels == OUTSIDE_BODY_BACKGROUND_LABEL).sum()}")
 
             # Step 5: 裁剪到人体边界框
-            print(f"  [5/6] 裁剪到人体边界框...")
+            print("  [5/6] Cropping to body bounding box...")
             original_shape = voxel_labels.shape
             voxel_labels, grid_info = crop_to_body_bbox(
                 voxel_labels, body_mask, grid_info,
                 padding_voxels=self.config.voxel.BODY_CROP_PADDING
             )
-            print(f"        裁剪前: {original_shape} -> 裁剪后: {voxel_labels.shape}")
-            print(f"        体素数减少: {np.prod(original_shape)} -> {np.prod(voxel_labels.shape)} "
+            print(f"        Before crop: {original_shape} -> After crop: {voxel_labels.shape}")
+            print(f"        Voxel count reduction: {np.prod(original_shape)} -> {np.prod(voxel_labels.shape)} "
                   f"({100 * np.prod(voxel_labels.shape) / np.prod(original_shape):.1f}%)")
-            print(f"        体内空白占比: {100 * (voxel_labels == INSIDE_BODY_EMPTY_LABEL).sum() / voxel_labels.size:.1f}%")
+            print(f"        Inside-body empty ratio: {100 * (voxel_labels == INSIDE_BODY_EMPTY_LABEL).sum() / voxel_labels.size:.1f}%")
 
             # Step 6: 保存输出
-            print(f"  [6/6] 保存输出 (简化格式)...")
+            print("  [6/6] Saving output (simplified format)...")
             split_dir = output_dir / split
             split_dir.mkdir(parents=True, exist_ok=True)
             save_case_npz(sensor_pc, voxel_labels, grid_info, split_dir / f'{case_id}.npz')
@@ -163,7 +166,7 @@ class CTToS2IConverter:
             hu_threshold=self.config.SKIN_HU_THRESHOLD
         )
         if skin_mesh is None:
-            raise ValueError("无法生成皮肤mesh")
+            raise ValueError("Failed to generate skin mesh")
 
         return generate_sensor_pointcloud(
             skin_mesh,
@@ -187,6 +190,7 @@ class CTToS2IConverter:
         标签语义:
         - 0: 体内空白 (INSIDE_BODY_EMPTY_LABEL)
         - 1+: 器官标签
+        - 255: 体外背景 (OUTSIDE_BODY_BACKGROUND_LABEL)
 
         返回:
             final_labels, body_mask, num_organs
@@ -214,7 +218,7 @@ class CTToS2IConverter:
                 organ_names.append(organ_name)
                 processed_files.add(seg_path.name)
             except Exception as e:
-                warnings.warn(f"处理器官 {organ_name} 失败: {e}")
+                warnings.warn(f"Failed to process organ {organ_name}: {e}")
 
         # 处理不在优先级列表中的器官（动态发现）
         for seg_file in seg_dir.glob('*.nii.gz'):
@@ -229,7 +233,7 @@ class CTToS2IConverter:
             organ_label = get_organ_label(organ_name)
             if organ_label < 1:
                 if organ_label == -1:
-                    warnings.warn(f"未知器官 {organ_name}，请添加到ORGAN_MAPPING")
+                    warnings.warn(f"Unknown organ {organ_name}; please add it to ORGAN_MAPPING")
                 continue
 
             try:
@@ -241,7 +245,7 @@ class CTToS2IConverter:
                 organ_names.append(organ_name)
                 processed_files.add(seg_file.name)
             except Exception as e:
-                warnings.warn(f"处理器官 {organ_name} 失败: {e}")
+                warnings.warn(f"Failed to process organ {organ_name}: {e}")
 
         if len(label_arrays) == 0:
             shape = voxel_coords.shape[:3]
@@ -256,7 +260,8 @@ class CTToS2IConverter:
         )
         final_labels = apply_body_region_labels(
             combined, body_mask,
-            inside_body_empty_label=INSIDE_BODY_EMPTY_LABEL
+            inside_body_empty_label=INSIDE_BODY_EMPTY_LABEL,
+            outside_body_background_label=OUTSIDE_BODY_BACKGROUND_LABEL,
         )
 
         return final_labels, body_mask, len(organ_names)
@@ -279,7 +284,7 @@ class CTToS2IConverter:
         npz_path = output_dir / split / f'{case_id}.npz'
         if not npz_path.exists():
             result['valid'] = False
-            result['errors'].append(f"数据文件不存在: {npz_path}")
+            result['errors'].append(f"Data file does not exist: {npz_path}")
             return result
 
         verify_result = verify_npz_format(npz_path)

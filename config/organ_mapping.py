@@ -1,9 +1,16 @@
 """
 器官标签映射模块 - S2I医学数据
 
-定义器官类别ID和处理优先级
-基于TotalSegmentator v2，包含所有类别，不做任何融合或忽略
-仅保留数据集中实际出现的器官（122个器官 + inside_body_empty = 123类）
+定义器官类别ID和处理优先级。
+基于TotalSegmentator v2，包含所有类别，不做任何融合或忽略。
+
+标签约定:
+- 0: inside_body_empty，体内但无器官标签
+- 1-122: 器官标签
+- 255: outside_body_background，体外背景特殊值
+
+训练类别数仍为 123（0-122）。
+255 是输出格式中的特殊背景值，不计入训练类别。
 
 作者：rongkun
 日期：2026-4
@@ -12,11 +19,13 @@
 from typing import Dict, List
 
 
-# 器官类别映射 - 123类（全部保留，不融合，不忽略）
-# 注意：0用于体内空白区域，器官从1开始
+# 器官类别映射
+# 0-122: 训练类别
+# 255: 体外背景特殊值
 ORGAN_MAPPING: Dict[str, int] = {
-    # ==================== 空白区域分类 (0) ====================
+    # ==================== 特殊标签 ====================
     'inside_body_empty': 0, # 体内空白（无器官标注但在体内）
+    'outside_body_background': 255, # 体外背景（不计入训练类别）
 
     # ==================== 实质器官 (1-13) ====================
     'liver': 1,
@@ -174,11 +183,12 @@ ORGAN_MAPPING: Dict[str, int] = {
 # 反向映射：ID -> 器官名称
 LABEL_TO_ORGAN: Dict[int, str] = {v: k for k, v in ORGAN_MAPPING.items()}
 
-# 类别数（包含 inside_body_empty）
+# 类别数（仅统计训练类别，不含 255 特殊背景值）
 NUM_CLASSES: int = 123  # 0=inside_body_empty, 1-122=organs
 
 # 特殊标签常量
 INSIDE_BODY_EMPTY_LABEL: int = 0  # 体内空白（无器官标注）
+OUTSIDE_BODY_BACKGROUND_LABEL: int = 255  # 体外背景特殊值
 
 # 器官处理优先级（后处理的会覆盖先处理的）
 # 设计原则：大/弥散区域先处理（可被小器官覆盖），肋骨最后处理（保护肋骨不被覆盖）
@@ -275,5 +285,5 @@ def get_organ_name(label: int) -> str:
 
 
 def get_class_names() -> List[str]:
-    """获取所有类别名称列表（按ID排序）"""
+    """获取训练类别名称列表（按ID排序，范围 0-122）"""
     return [get_organ_name(i) for i in range(NUM_CLASSES)]

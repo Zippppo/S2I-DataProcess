@@ -278,7 +278,8 @@ def crop_to_body_bbox(
 def apply_body_region_labels(
     voxel_labels: np.ndarray,
     body_mask: np.ndarray,
-    inside_body_empty_label: int = 0
+    inside_body_empty_label: int = 0,
+    outside_body_background_label: int = 255
 ) -> np.ndarray:
     """
     对体素应用体内区域标签
@@ -286,7 +287,7 @@ def apply_body_region_labels(
     逻辑:
     - 体内且无器官标签: inside_body_empty_label (0)
     - 有器官标签: 保持原标签（>= 1）
-    - 体外无器官: 保持 0（与 inside_body_empty 相同，不再区分）
+    - 体外无器官: outside_body_background_label (255)
     """
     modified_labels = voxel_labels.copy()
 
@@ -294,5 +295,7 @@ def apply_body_region_labels(
 
     # 体内无器官 -> inside_body_empty_label (0)
     modified_labels[body_mask & no_organ] = inside_body_empty_label
+    # 体外无器官 -> outside_body_background_label (255)
+    modified_labels[~body_mask & no_organ] = outside_body_background_label
 
     return modified_labels

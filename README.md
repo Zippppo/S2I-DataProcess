@@ -6,7 +6,7 @@
 
 - **世界坐标系（毫米）** — 不做归一化，直接使用CT affine矩阵提供的物理坐标
 - **固定体素尺寸，动态网格大小** — 指定物理体素大小（默认4×4×4mm），网格维度由点云边界自动计算
-- **123类器官标签** — 覆盖TotalSegmentator v2全集，通过优先级列表解决重叠冲突
+- **123类训练标签 + 体外背景特殊值** — `0=inside_body_empty`，`1-122=organs`，`255=outside_body_background`
 - **自动裁剪** — 基于HU阈值检测人体区域，裁剪多余空间
 
 ## 快速开始
@@ -107,13 +107,19 @@ output_dir/
 | `grid_voxel_size` | float32, (3,) | 体素物理尺寸 |
 | `grid_occ_size` | int, (3,) | 网格维度 |
 
+`voxel_labels` 的标签语义：
+
+- `0`: `inside_body_empty`
+- `1-122`: 器官标签
+- `255`: `outside_body_background`
+
 ## 项目结构
 
 ```
 medical_s2i_data_pipeline/
 ├── config/
 │   ├── data_config.py            # DataConfig / CameraConfig / VoxelConfig
-│   └── organ_mapping.py          # 123类器官映射与优先级
+│   └── organ_mapping.py          # 123类训练标签、255体外背景值与优先级
 ├── pipeline/
 │   └── ct_to_s2i.py              # CTToS2IConverter 主转换流程
 ├── utils/

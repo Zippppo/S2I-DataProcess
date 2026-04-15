@@ -13,3 +13,4 @@ build/
 .env
 *.log
 test-output/
+working_log/
